@@ -1,0 +1,35 @@
+# Vask Default Configuration
+
+# System settings
+version: "1.0.0"
+offline_mode: true
+
+# Audio settings
+language: "en"
+voice_id: "en_US-hfc_female-medium"
+speaking_rate: 1.0  # 0.5-2.0
+listening_sensitivity: 0.8  # 0.0-1.0
+
+# Feature settings
+enable_camera: true
+enable_audio_output: true
+enable_learning: true
+
+# Performance settings
+max_context_exchanges: 10
+response_timeout_seconds: 2
+
+# Privacy settings
+encryption_enabled: true
+auto_delete_after_days: null  # null = never auto-delete
+
+# Model paths
+whisper_model_path: "models/whisper-base"
+llama_model_path: "models/llama-2-7b-q4"
+piper_model_path: "models/piper-voices"
+
+# Mood sensitivity
+mood_sensitivity: 0.8  # 0.0-1.0
+
+# Response tone
+response_tone: "empathetic"  # empathetic, technical, casual, formal

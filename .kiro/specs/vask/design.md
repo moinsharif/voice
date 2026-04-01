@@ -854,3 +854,463 @@ class FallbackResponses:
 
 Property-based testing validates universal properties across many generated inputs, ensuring correctness guarantees.
 
+## Correctness Properties
+
+*A property is a characteristic or behavior that should hold true across all valid executions of a system—essentially, a formal statement about what the system should do. Properties serve as the bridge between human-readable specifications and machine-verifiable correctness guarantees.*
+
+### Property Reflection and Consolidation
+
+After analyzing all acceptance criteria, the following redundancies were identified and consolidated:
+
+**Consolidated Properties**:
+- Speech recognition accuracy, noise filtering, and language support consolidated into a single "Speech Recognition Robustness" property
+- Context maintenance, mood consideration, and offline operation consolidated into "AI Response Generation" property
+- Conversation persistence, history loading, and search functionality consolidated into "Conversation History Management" property
+- Face detection, expression analysis, and frame rate consolidated into "Face Detection and Expression Analysis" property
+- Mood detection from multiple sources, classification, and history consolidated into "Mood Analysis" property
+- Learning system analysis, pattern identification, and profile updates consolidated into "Learning System" property
+- User profile creation, updates, and personalization consolidated into "User Profile Management" property
+- Offline operation, model verification, and data privacy consolidated into "Privacy and Offline Operation" property
+- TTS conversion, playback, and voice configuration consolidated into "Text-to-Speech" property
+- Session creation, recording, and persistence consolidated into "Session Management" property
+- Configuration parsing, validation, and persistence consolidated into "Configuration Management" property
+- Performance metrics (RAM, CPU, startup) consolidated into "Performance Optimization" property
+- Multi-user support and data isolation consolidated into "Multi-User Data Isolation" property
+- Mood reporting and analytics consolidated into "Mood Analytics and Reporting" property
+- Configuration round-trip and format support consolidated into "Configuration Serialization" property
+- Conversation serialization round-trip consolidated into "Conversation Serialization" property
+- User profile persistence round-trip consolidated into "User Profile Persistence" property
+
+### Correctness Properties
+
+### Property 1: Speech Recognition Robustness
+
+*For any* clear speech audio input, the Speech Recognition Engine should convert it to text with at least 85% accuracy, and for any audio with background noise, noise filtering should be applied before recognition is attempted.
+
+**Validates: Requirements 1.2, 1.3, 1.6**
+
+### Property 2: Speech Recognition Performance
+
+*For any* speech input, the Speech Recognition Engine should complete recognition within 3 seconds of speech completion.
+
+**Validates: Requirements 1.5**
+
+### Property 3: AI Response Generation
+
+*For any* user message with conversation context, the AI Model should generate a response that references or acknowledges the context, considers the user's mood state, and completes within 2 seconds, while operating entirely offline.
+
+**Validates: Requirements 2.1, 2.2, 2.3, 2.4, 2.6**
+
+### Property 4: Context Maintenance
+
+*For any* active conversation session, the Context Manager should maintain at most the last 10 exchanges in active memory, and when a user references previous conversations, relevant historical context should be retrieved.
+
+**Validates: Requirements 2.2, 2.5**
+
+### Property 5: Conversation History Persistence
+
+*For any* completed conversation session, all exchanges (including timestamp, user message, AI response, detected mood, and session metadata) should be persisted to local storage, and when a new session begins, the previous conversation history should be loadable.
+
+**Validates: Requirements 3.1, 3.2, 3.3**
+
+### Property 6: Conversation History Retrieval Performance
+
+*For any* historical conversation retrieval operation, results should be returned within 500ms, and the system should support searching by date, mood, or keyword.
+
+**Validates: Requirements 3.4, 3.5**
+
+### Property 7: Conversation Deletion
+
+*For any* conversation marked for deletion, it should no longer be retrievable from storage after deletion is requested.
+
+**Validates: Requirements 3.6**
+
+### Property 8: Face Detection and Expression Analysis
+
+*For any* detected face in video frames, the Face Detector should identify facial landmarks and classify expressions into at least: happiness, sadness, anger, surprise, and neutral states, while processing frames at 15 FPS minimum without degrading system performance.
+
+**Validates: Requirements 4.2, 4.4, 4.5**
+
+### Property 9: Camera Graceful Degradation
+
+*For any* session where camera mode is disabled, the system should continue operation using voice-only mood detection without interruption.
+
+**Validates: Requirements 4.6**
+
+### Property 10: Mood Analysis
+
+*For any* user input (audio and/or facial expressions), the Mood Analyzer should detect emotional state and classify it into one of: positive, neutral, negative, or mixed, and when mood changes significantly, response tone and content should adapt accordingly.
+
+**Validates: Requirements 5.1, 5.2, 5.3**
+
+### Property 11: Mood History and Reporting
+
+*For any* completed session, a mood history should be maintained, and when a user requests a mood report, a summary of mood patterns should be generated with statistics for daily, weekly, and monthly periods, including trend identification and topic correlation.
+
+**Validates: Requirements 5.4, 5.5, 15.1, 15.2, 15.3, 15.4**
+
+### Property 12: Learning System
+
+*For any* completed day, the Learning System should analyze all interactions, identify patterns in user preferences and communication style, update the User Profile with learned preferences, and apply these learnings to improve response generation for the next day.
+
+**Validates: Requirements 6.1, 6.2, 6.3, 6.5, 6.6**
+
+### Property 13: Response Feedback Tracking
+
+*For any* generated response, the system should track whether it received positive feedback, and responses with positive feedback should be prioritized in future response generation.
+
+**Validates: Requirements 6.4, 6.5**
+
+### Property 14: User Profile Management
+
+*For any* new user, a User Profile should be created on first interaction, and for all interactions, the profile should be updated with learned preferences including communication style, preferred topics, mood patterns, and interaction history.
+
+**Validates: Requirements 7.1, 7.2, 7.3**
+
+### Property 15: User Profile Personalization
+
+*For any* response generation, the AI Model should reference the User Profile to personalize content, and when a user provides explicit preferences, the profile should be updated immediately.
+
+**Validates: Requirements 7.4, 7.5**
+
+### Property 16: User Profile Encryption and Local Storage
+
+*For any* User Profile, it should be encrypted and stored locally with no external transmission.
+
+**Validates: Requirements 7.6**
+
+### Property 17: Offline Operation
+
+*For any* operation, the system should operate entirely without internet connectivity, and no external API calls should be made.
+
+**Validates: Requirements 8.1, 8.4, 8.5**
+
+### Property 18: Model Availability Verification
+
+*For any* system startup, all required models (Whisper, Llama 2, MediaPipe, Piper) should be verified as available locally.
+
+**Validates: Requirements 8.2**
+
+### Property 19: Data Export
+
+*For any* user data export request, the system should provide data in standard formats (JSON, CSV).
+
+**Validates: Requirements 8.6**
+
+### Property 20: Text-to-Speech Conversion and Playback
+
+*For any* AI-generated response, the Text-to-Speech Engine should convert it to audio and play it through system speakers, supporting multiple voices and speaking rates, and completing synthesis within 1 second per 100 words.
+
+**Validates: Requirements 9.1, 9.2, 9.3, 9.4**
+
+### Property 21: Text-to-Speech Graceful Degradation
+
+*For any* session where audio output is disabled, the system should display text responses instead without interruption.
+
+**Validates: Requirements 9.5**
+
+### Property 22: Text-to-Speech Offline Operation
+
+*For any* TTS operation, the system should operate entirely offline using local voice models without external calls.
+
+**Validates: Requirements 9.6**
+
+### Property 23: Session Management
+
+*For any* user session initiation, a new Session record should be created with timestamp, and for all active sessions, the system should continuously listen for voice input, begin recording on wake word or button press, and save all session data to Conversation History when the session ends.
+
+**Validates: Requirements 10.1, 10.2, 10.3, 10.4, 10.5**
+
+### Property 24: Session Replay
+
+*For any* session replay request, the system should retrieve and replay both the session audio and transcript.
+
+**Validates: Requirements 10.6**
+
+### Property 25: Error Logging and Recovery
+
+*For any* error that occurs, the system should log the error and maintain error logs for debugging purposes, and for critical errors, automatic recovery should be attempted before notifying the user.
+
+**Validates: Requirements 11.1, 11.5, 11.6**
+
+### Property 26: Graceful Degradation on Component Failure
+
+*For any* component failure, the system should continue operation with reduced functionality (e.g., voice-only if camera fails, text-only if TTS fails).
+
+**Validates: Requirements 11.3**
+
+### Property 27: Configuration Interface and Persistence
+
+*For any* configuration change made through the configuration interface, the setting should be persisted to local storage and applied to the system.
+
+**Validates: Requirements 12.1, 12.2**
+
+### Property 28: Response Tone Adaptation
+
+*For any* user-configured response tone setting, the AI Model should adapt its response generation accordingly.
+
+**Validates: Requirements 12.3**
+
+### Property 29: Configuration Options
+
+*For any* of the configurable settings (language, voice, speaking rate, listening sensitivity, mood sensitivity), the system should allow adjustment and validation before applying.
+
+**Validates: Requirements 12.4, 12.6**
+
+### Property 30: Configuration Reset
+
+*For any* reset request, the system should restore all settings to default configurations.
+
+**Validates: Requirements 12.5**
+
+### Property 31: Memory Optimization
+
+*For any* normal operation, the system should use no more than 2GB of RAM and support running on machines with minimum 4GB RAM and dual-core processors.
+
+**Validates: Requirements 13.1, 13.3**
+
+### Property 32: System Responsiveness During Audio Processing
+
+*For any* audio processing operation, the system should maintain responsiveness and not block user interactions.
+
+**Validates: Requirements 13.2**
+
+### Property 33: Idle Resource Consumption
+
+*For any* idle state, the system should consume minimal CPU resources.
+
+**Validates: Requirements 13.4**
+
+### Property 34: Startup Optimization
+
+*For any* system startup, model loading should be optimized to minimize startup time.
+
+**Validates: Requirements 13.5**
+
+### Property 35: Graceful Quality Degradation
+
+*For any* state where system resources are constrained, the system should reduce processing quality gracefully rather than failing.
+
+**Validates: Requirements 13.6**
+
+### Property 36: Multi-User Identification
+
+*For any* new user interaction, the Face Detector should attempt to identify them, and if not recognized, a new User Profile should be created.
+
+**Validates: Requirements 14.1, 14.2**
+
+### Property 37: Multi-User Data Loading
+
+*For any* recognized user returning to the system, the Context Manager should load their User Profile and conversation history.
+
+**Validates: Requirements 14.3**
+
+### Property 38: Multi-User Data Isolation
+
+*For any* user, their Conversation History should be separate from other users, and user data should be securely isolated with no cross-contamination.
+
+**Validates: Requirements 14.4, 14.6**
+
+### Property 39: Manual User Selection Fallback
+
+*For any* scenario where users are not distinguishable by face, the system should provide manual user selection as a fallback.
+
+**Validates: Requirements 14.5**
+
+### Property 40: Mood Pattern Correlation
+
+*For any* mood report, the system should correlate mood with conversation topics and times of day.
+
+**Validates: Requirements 15.4**
+
+### Property 41: Supportive Suggestions
+
+*For any* mood pattern that indicates concerns, the system should provide supportive suggestions.
+
+**Validates: Requirements 15.5**
+
+### Property 42: Configuration Serialization Round-Trip
+
+*For any* valid Configuration object, parsing it to a file, then printing it, then parsing it again should produce an equivalent Configuration object.
+
+**Validates: Requirements 16.1, 16.3, 16.4, 16.6**
+
+### Property 43: Conversation Serialization Round-Trip
+
+*For any* valid Conversation object, serializing it to JSON and then deserializing it should produce an equivalent Conversation object, handling all data types (text, timestamps, mood data, metadata).
+
+**Validates: Requirements 17.1, 17.2, 17.3, 17.5**
+
+### Property 44: User Profile Persistence Round-Trip
+
+*For any* valid User Profile object, saving it to local storage and then loading it should produce an equivalent User Profile object.
+
+**Validates: Requirements 18.1, 18.2, 18.3**
+
+### Property 45: User Profile Encryption
+
+*For any* User Profile, sensitive data should be encrypted at rest using AES-256 encryption.
+
+**Validates: Requirements 18.5**
+
+## Error Handling
+
+### Error Categories and Responses
+
+**Speech Recognition Errors**:
+- Recognition timeout → "I didn't catch that. Could you please repeat?"
+- Low confidence → "I'm not sure I understood. Could you rephrase?"
+- Unsupported language → "I don't support that language yet. Please select a supported language."
+
+**AI Model Errors**:
+- Model loading failure → "I'm having trouble starting up. Please check your model files."
+- Response generation timeout → "I'm thinking... let me try again."
+- Out of memory → "I'm running low on memory. Let me free up some space."
+
+**Face Detection Errors**:
+- Camera access denied → "I need camera permission to see you. Please enable camera access."
+- No face detected → "I can't see you right now, but I'm still listening."
+- Face detection timeout → "I'm having trouble seeing you. Continuing with voice-only mode."
+
+**Mood Analysis Errors**:
+- Inconclusive mood → "I'm not sure how you're feeling. Could you tell me?"
+- Analysis failure → "I'm having trouble understanding your mood. Let's continue anyway."
+
+**Persistence Errors**:
+- Database corruption → "I'm having trouble remembering. Let me try to recover..."
+- Encryption failure → "I'm having trouble securing your data. Please check your settings."
+- Storage full → "I'm running out of storage space. Please free up some space."
+
+**Configuration Errors**:
+- Invalid configuration file → "Your configuration file has an error on line X: [description]. Please fix it."
+- Missing required setting → "Your configuration is missing a required setting: [setting_name]."
+- Invalid setting value → "The value for [setting_name] is invalid. Expected [type], got [value]."
+
+### Error Recovery Strategies
+
+1. **Automatic Retry**: For transient errors (network timeouts, temporary resource unavailability), retry with exponential backoff (1s, 2s, 4s, 8s max)
+2. **Fallback Mechanisms**: When a component fails, use alternative approaches (voice-only if camera fails, text-only if TTS fails)
+3. **Graceful Degradation**: Reduce quality rather than fail completely (lower frame rate if CPU constrained, smaller model if memory constrained)
+4. **Data Recovery**: Attempt recovery from backups for corrupted data
+5. **User Notification**: Inform user of errors with clear, actionable messages
+
+## Testing Strategy
+
+### Unit Testing Approach
+
+**Focus Areas**:
+- Individual component functionality in isolation
+- Edge cases and boundary conditions
+- Data validation and transformation
+- Configuration parsing and validation
+- Error handling and recovery
+
+**Example Unit Tests**:
+- Speech recognition with various audio qualities (clear, noisy, accented)
+- AI response generation with different contexts and moods
+- Mood classification with conflicting signals (happy face, sad voice)
+- Configuration parsing with valid and invalid inputs
+- Data serialization/deserialization with all data types
+- Face detection with different lighting conditions
+- TTS synthesis with various text lengths and special characters
+
+**Testing Framework**: pytest with fixtures for mocking components
+
+**Mocking Strategy**:
+- Mock external components (microphone, camera, speakers) for unit tests
+- Use dependency injection to allow component substitution
+- Create test doubles for AI models to ensure fast, deterministic tests
+
+### Integration Testing
+
+**Focus Areas**:
+- Component interactions and data flow
+- End-to-end conversation flow
+- Data persistence and retrieval
+- Multi-user scenarios
+- Configuration changes during runtime
+
+**Test Scenarios**:
+1. Complete conversation session: user speaks → recognition → AI response → TTS playback
+2. User profile creation and updates: new user → profile creation → interaction → profile update
+3. Conversation history persistence: session ends → data saved → new session → history loaded
+4. Mood analysis across sessions: multiple sessions → mood patterns identified → report generated
+5. Multi-user support: user A interacts → user B identified → separate profiles loaded
+6. Configuration changes: update setting → verify applied → restart → verify persisted
+7. Error recovery: component fails → graceful degradation → recovery attempted
+
+**Integration Test Environment**:
+- Use real components where possible (actual models, actual database)
+- Use test data fixtures for reproducibility
+- Isolate tests to prevent cross-contamination
+
+### Property-Based Testing
+
+Property-based testing validates universal properties across many generated inputs, ensuring correctness guarantees.
+
+**Property Test Configuration**:
+- Minimum 100 iterations per property test
+- Each test references its design document property
+- Tag format: **Feature: vask, Property {number}: {property_text}**
+
+**Example Property Tests**:
+
+**Property 1: Speech Recognition Robustness**
+- Generate random clear speech samples
+- Verify accuracy ≥85%
+- Generate random noisy audio
+- Verify noise filtering is applied
+
+**Property 5: Conversation History Persistence**
+- Generate random conversation sessions
+- Save to storage
+- Load from storage
+- Verify all exchanges are present and unchanged
+
+**Property 42: Configuration Serialization Round-Trip**
+- Generate random valid Configuration objects
+- Serialize to YAML/JSON
+- Deserialize back
+- Verify equivalence
+
+**Property 43: Conversation Serialization Round-Trip**
+- Generate random Conversation objects with all data types
+- Serialize to JSON
+- Deserialize back
+- Verify equivalence
+
+**Property 44: User Profile Persistence Round-Trip**
+- Generate random User Profile objects
+- Save to storage
+- Load from storage
+- Verify equivalence
+
+**Property-Based Testing Libraries**:
+- **Python**: Hypothesis (recommended for comprehensive input generation)
+- **Alternative**: pytest-randomly for randomized test execution
+
+**Generator Strategies**:
+- Text generation: random strings, special characters, unicode
+- Timestamps: random valid datetime values
+- Mood data: random mood classifications and confidence scores
+- Audio data: random byte sequences representing audio
+- Configuration values: random valid values within constraints
+
+**Shrinking Strategy**:
+- When a property test fails, Hypothesis automatically shrinks the failing example to the minimal case
+- This helps identify the root cause of failures
+
+### Testing Coverage Goals
+
+- **Unit Tests**: 80%+ code coverage for core components
+- **Integration Tests**: All major workflows and user scenarios
+- **Property Tests**: All 45 correctness properties implemented
+- **Edge Cases**: All identified edge cases from acceptance criteria
+
+### Continuous Testing
+
+- Run unit tests on every commit
+- Run integration tests on pull requests
+- Run property tests nightly (due to longer execution time)
+- Maintain error logs for debugging failed tests
+

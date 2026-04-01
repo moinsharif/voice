@@ -1,0 +1,638 @@
+"""
+Vask Voice AI - Graphical User Interface
+Real-time voice recording, transcription, and AI response
+"""
+
+import tkinter as tk
+from tkinter import ttk, messagebox, scrolledtext
+import threading
+import os
+from pathlib import Path
+import numpy as np
+from datetime import datetime
+
+# Add src to path
+import sys
+sys.path.insert(0, str(Path(__file__).parent))
+
+from src.main import VaskApplication
+
+
+class VaskGUI:
+    """Graphical User Interface for Vask Voice AI."""
+    
+    def __init__(self, root):
+        """Initialize GUI."""
+        self.root = root
+        self.root.title("Vask - Voice AI Companion")
+        self.root.geometry("900x700")
+        self.root.resizable(True, True)
+        
+        # Application
+        self.app = None
+        self.is_recording = False
+        self.audio_data = None
+        self.sample_rate = None
+        self.whisper_model = None  # Cache model to avoid re-downloading
+        self.conversation_history = []  # Store conversation history
+        
+        # Create UI
+        self.create_ui()
+        
+        # Initialize app and load model
+        self.initialize_app()
+        self.load_whisper_model()
+    
+    def create_ui(self):
+        """Create user interface."""
+        
+        # Main frame
+        main_frame = ttk.Frame(self.root, padding="10")
+        main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        
+        # Title
+        title_label = ttk.Label(
+            main_frame,
+            text="🎤 Vask - Voice AI Companion",
+            font=("Arial", 18, "bold")
+        )
+        title_label.grid(row=0, column=0, columnspan=3, pady=10)
+        
+        # Status frame
+        status_frame = ttk.LabelFrame(main_frame, text="Status", padding="10")
+        status_frame.grid(row=1, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=10)
+        
+        self.status_label = ttk.Label(
+            status_frame,
+            text="Ready",
+            font=("Arial", 12),
+            foreground="green"
+        )
+        self.status_label.pack()
+        
+        # Control frame
+        control_frame = ttk.LabelFrame(main_frame, text="Controls", padding="10")
+        control_frame.grid(row=2, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=10)
+        
+        # Record button
+        self.record_btn = ttk.Button(
+            control_frame,
+            text="🎤 Start Recording",
+            command=self.toggle_recording
+        )
+        self.record_btn.pack(side=tk.LEFT, padx=5)
+        
+        # Playback button
+        self.playback_btn = ttk.Button(
+            control_frame,
+            text="🔊 Playback",
+            command=self.playback_audio,
+            state=tk.DISABLED
+        )
+        self.playback_btn.pack(side=tk.LEFT, padx=5)
+        
+        # Transcribe button
+        self.transcribe_btn = ttk.Button(
+            control_frame,
+            text="📝 Transcribe",
+            command=self.transcribe_audio,
+            state=tk.DISABLED
+        )
+        self.transcribe_btn.pack(side=tk.LEFT, padx=5)
+        
+        # Language selection
+        lang_frame = ttk.Frame(control_frame)
+        lang_frame.pack(side=tk.LEFT, padx=5)
+        
+        ttk.Label(lang_frame, text="Language:").pack(side=tk.LEFT, padx=2)
+        
+        self.language_var = tk.StringVar(value="en")
+        lang_combo = ttk.Combobox(
+            lang_frame,
+            textvariable=self.language_var,
+            values=["en", "bn", "hi", "es", "fr"],
+            state="readonly",
+            width=5
+        )
+        lang_combo.pack(side=tk.LEFT, padx=2)
+        
+        # Clear button
+        clear_btn = ttk.Button(
+            control_frame,
+            text="🗑️ Clear",
+            command=self.clear_all
+        )
+        clear_btn.pack(side=tk.LEFT, padx=5)
+        
+        # Clear Cache button
+        cache_btn = ttk.Button(
+            control_frame,
+            text="🧹 Clear Cache",
+            command=self.clear_cache
+        )
+        cache_btn.pack(side=tk.LEFT, padx=5)
+        
+        # Transcription frame
+        trans_frame = ttk.LabelFrame(main_frame, text="Transcription", padding="10")
+        trans_frame.grid(row=3, column=0, columnspan=3, sticky=(tk.W, tk.E, tk.N, tk.S), pady=10)
+        
+        self.transcription_text = scrolledtext.ScrolledText(
+            trans_frame,
+            height=4,
+            width=80,
+            font=("Arial", 11),
+            state=tk.DISABLED
+        )
+        self.transcription_text.pack(fill=tk.BOTH, expand=True)
+        
+        # Analysis frame
+        analysis_frame = ttk.LabelFrame(main_frame, text="Analysis", padding="10")
+        analysis_frame.grid(row=4, column=0, columnspan=3, sticky=(tk.W, tk.E, tk.N, tk.S), pady=10)
+        
+        self.analysis_text = scrolledtext.ScrolledText(
+            analysis_frame,
+            height=4,
+            width=80,
+            font=("Arial", 10),
+            state=tk.DISABLED
+        )
+        self.analysis_text.pack(fill=tk.BOTH, expand=True)
+        
+        # AI Response frame
+        response_frame = ttk.LabelFrame(main_frame, text="AI Response", padding="10")
+        response_frame.grid(row=5, column=0, columnspan=3, sticky=(tk.W, tk.E, tk.N, tk.S), pady=10)
+        
+        self.response_text = scrolledtext.ScrolledText(
+            response_frame,
+            height=3,
+            width=80,
+            font=("Arial", 11),
+            state=tk.DISABLED
+        )
+        self.response_text.pack(fill=tk.BOTH, expand=True)
+        
+        # History frame
+        history_frame = ttk.LabelFrame(main_frame, text="Conversation History", padding="10")
+        history_frame.grid(row=6, column=0, columnspan=3, sticky=(tk.W, tk.E, tk.N, tk.S), pady=10)
+        
+        self.history_text = scrolledtext.ScrolledText(
+            history_frame,
+            height=3,
+            width=80,
+            font=("Arial", 9),
+            state=tk.DISABLED
+        )
+        self.history_text.pack(fill=tk.BOTH, expand=True)
+        
+        # Configure grid weights
+        self.root.columnconfigure(0, weight=1)
+        self.root.rowconfigure(0, weight=1)
+        main_frame.columnconfigure(0, weight=1)
+        main_frame.rowconfigure(3, weight=1)
+        main_frame.rowconfigure(4, weight=1)
+        main_frame.rowconfigure(5, weight=1)
+    
+    def initialize_app(self):
+        """Initialize Vask application."""
+        try:
+            self.update_status("Initializing Vask...", "blue")
+            self.app = VaskApplication()
+            self.app.start()
+            self.update_status("Ready", "green")
+        except Exception as e:
+            self.update_status(f"Error: {e}", "red")
+            messagebox.showerror("Error", f"Failed to initialize: {e}")
+    
+    def load_whisper_model(self):
+        """Load Whisper model once and cache it."""
+        try:
+            self.update_status("Loading Whisper model (first time only)...", "blue")
+            import whisper
+            self.whisper_model = whisper.load_model("base")
+            self.update_status("Whisper model loaded", "green")
+        except Exception as e:
+            self.update_status(f"Error loading model: {e}", "red")
+            messagebox.showerror("Error", f"Failed to load Whisper model: {e}")
+    
+    def update_status(self, message, color="black"):
+        """Update status label."""
+        self.status_label.config(text=message, foreground=color)
+        self.root.update()
+    
+    def start_recording(self):
+        """Start recording voice."""
+        if self.is_recording:
+            return
+        
+        self.is_recording = True
+        self.record_btn.config(state=tk.NORMAL, text="⏹️ Stop Recording")
+        self.playback_btn.config(state=tk.DISABLED)
+        self.transcribe_btn.config(state=tk.DISABLED)
+        
+        # Run in thread
+        thread = threading.Thread(target=self._record_thread)
+        thread.daemon = True
+        thread.start()
+    
+    def toggle_recording(self):
+        """Toggle recording on/off."""
+        if not self.is_recording:
+            self.start_recording()
+        else:
+            self.stop_recording()
+    
+    def stop_recording(self):
+        """Stop recording."""
+        self.is_recording = False
+        self.record_btn.config(text="🎤 Start Recording")
+        self.update_status("Recording stopped", "green")
+    
+    def playback_audio(self):
+        """Playback recorded audio."""
+        if self.audio_data is None:
+            messagebox.showwarning("Warning", "No audio recorded. Please record first.")
+            return
+        
+        self.playback_btn.config(state=tk.DISABLED)
+        
+        # Run in thread
+        thread = threading.Thread(target=self._playback_thread)
+        thread.daemon = True
+        thread.start()
+    
+    def _playback_thread(self):
+        """Playback thread."""
+        try:
+            self.update_status("Playing back audio...", "blue")
+            
+            import pyaudio
+            
+            CHUNK = 1024
+            FORMAT = pyaudio.paInt16
+            CHANNELS = 1
+            
+            p = pyaudio.PyAudio()
+            
+            stream = p.open(
+                format=FORMAT,
+                channels=CHANNELS,
+                rate=self.sample_rate,
+                output=True,
+                frames_per_buffer=CHUNK
+            )
+            
+            # Play audio
+            audio_bytes = self.audio_data.tobytes()
+            for i in range(0, len(audio_bytes), CHUNK * 2):
+                chunk = audio_bytes[i:i + CHUNK * 2]
+                stream.write(chunk)
+                
+                # Update progress
+                progress = int((i / len(audio_bytes)) * 100)
+                self.update_status(f"Playing... {progress}%", "blue")
+            
+            stream.stop_stream()
+            stream.close()
+            p.terminate()
+            
+            self.update_status("Playback complete", "green")
+            self.playback_btn.config(state=tk.NORMAL)
+            
+        except Exception as e:
+            self.update_status(f"Playback error: {e}", "red")
+            self.playback_btn.config(state=tk.NORMAL)
+    
+    def _record_thread(self):
+        """Recording thread."""
+        try:
+            self.update_status("Recording... Speak now!", "orange")
+            
+            import pyaudio
+            
+            CHUNK = 1024
+            FORMAT = pyaudio.paInt16
+            CHANNELS = 1
+            RATE = 16000
+            
+            p = pyaudio.PyAudio()
+            
+            stream = p.open(
+                format=FORMAT,
+                channels=CHANNELS,
+                rate=RATE,
+                input=True,
+                frames_per_buffer=CHUNK
+            )
+            
+            frames = []
+            max_chunks = int(RATE / CHUNK * 300)  # Max 5 minutes
+            
+            for i in range(0, max_chunks):
+                if not self.is_recording:
+                    break
+                
+                data = stream.read(CHUNK)
+                frames.append(data)
+                
+                # Update progress
+                seconds = i * CHUNK / RATE
+                self.update_status(f"Recording... {seconds:.1f}s", "orange")
+            
+            stream.stop_stream()
+            stream.close()
+            p.terminate()
+            
+            # Convert to numpy array
+            if frames:
+                self.audio_data = np.frombuffer(b''.join(frames), dtype=np.int16)
+                self.sample_rate = RATE
+                
+                self.update_status("Recording complete. Ready to transcribe.", "green")
+                self.playback_btn.config(state=tk.NORMAL)  # Enable playback
+                self.transcribe_btn.config(state=tk.NORMAL)
+            else:
+                self.update_status("No audio recorded", "red")
+            
+            self.record_btn.config(state=tk.NORMAL, text="🎤 Start Recording")
+            self.is_recording = False
+            
+        except Exception as e:
+            self.update_status(f"Recording error: {e}", "red")
+            self.record_btn.config(state=tk.NORMAL, text="🎤 Start Recording")
+            self.is_recording = False
+    
+    def transcribe_audio(self):
+        """Transcribe recorded audio."""
+        if self.audio_data is None:
+            messagebox.showwarning("Warning", "No audio recorded. Please record first.")
+            return
+        
+        self.transcribe_btn.config(state=tk.DISABLED)
+        
+        # Run in thread
+        thread = threading.Thread(target=self._transcribe_thread)
+        thread.daemon = True
+        thread.start()
+    
+    def _transcribe_thread(self):
+        """Transcription thread."""
+        try:
+            self.update_status("Transcribing...", "blue")
+            
+            # Get selected language
+            language = self.language_var.get()
+            
+            # Save audio temporarily
+            import wave
+            temp_file = "temp_audio.wav"
+            
+            with wave.open(temp_file, 'wb') as wav_file:
+                wav_file.setnchannels(1)
+                wav_file.setsampwidth(2)
+                wav_file.setframerate(self.sample_rate)
+                wav_file.writeframes(self.audio_data.tobytes())
+            
+            # Transcribe using cached model
+            from scipy.io import wavfile
+            
+            # Load audio with scipy instead of ffmpeg
+            sample_rate, audio_data = wavfile.read(temp_file)
+            
+            # Convert to float32
+            if audio_data.dtype == np.int16:
+                audio_data = audio_data.astype(np.float32) / 32768.0
+            
+            # If stereo, convert to mono
+            if len(audio_data.shape) > 1:
+                audio_data = np.mean(audio_data, axis=1)
+            
+            # Resample if needed
+            if sample_rate != 16000:
+                from scipy import signal
+                num_samples = int(len(audio_data) * 16000 / sample_rate)
+                audio_data = signal.resample(audio_data, num_samples)
+            
+            # Transcribe using cached model with selected language
+            if self.whisper_model is None:
+                self.update_status("Model not loaded", "red")
+                return
+            
+            result = self.whisper_model.transcribe(audio_data, language=language)
+            
+            text = result["text"].strip()
+            
+            # Display transcription
+            self.display_transcription(text)
+            
+            # Analyze
+            self.analyze_transcription(text)
+            
+            # Generate AI response
+            self.generate_response(text)
+            
+            # Cleanup
+            if os.path.exists(temp_file):
+                os.remove(temp_file)
+            
+            self.update_status("Transcription complete", "green")
+            self.transcribe_btn.config(state=tk.NORMAL)
+            
+        except Exception as e:
+            self.update_status(f"Transcription error: {e}", "red")
+            self.transcribe_btn.config(state=tk.NORMAL)
+            import traceback
+            traceback.print_exc()
+    
+    def display_transcription(self, text):
+        """Display transcribed text."""
+        self.transcription_text.config(state=tk.NORMAL)
+        self.transcription_text.delete(1.0, tk.END)
+        self.transcription_text.insert(tk.END, f'"{text}"')
+        self.transcription_text.config(state=tk.DISABLED)
+    
+    def analyze_transcription(self, text):
+        """Analyze transcribed text."""
+        text_lower = text.lower()
+        
+        analysis = []
+        analysis.append(f"Length: {len(text)} characters, {len(text.split())} words")
+        
+        # Keyword detection
+        keywords = {
+            "hello": "hello" in text_lower,
+            "hi": "hi" in text_lower,
+            "bye": "bye" in text_lower or "goodbye" in text_lower,
+            "thanks": "thank" in text_lower,
+            "yes": "yes" in text_lower,
+            "no": "no" in text_lower,
+            "help": "help" in text_lower,
+        }
+        
+        found = [k for k, v in keywords.items() if v]
+        if found:
+            analysis.append(f"Keywords detected: {', '.join(found)}")
+        else:
+            analysis.append("No keywords detected")
+        
+        # Display analysis
+        self.analysis_text.config(state=tk.NORMAL)
+        self.analysis_text.delete(1.0, tk.END)
+        self.analysis_text.insert(tk.END, "\n".join(analysis))
+        self.analysis_text.config(state=tk.DISABLED)
+    
+    def generate_response(self, text):
+        """Generate AI response using offline knowledge base."""
+        text_lower = text.lower()
+        
+        # Detect language
+        language = self.language_var.get()
+        
+        # ENGLISH RESPONSES
+        if language == "en":
+            # Greeting responses
+            if any(word in text_lower for word in ["hello", "hi", "hey", "greetings"]):
+                response = "Hello! Nice to meet you. How can I help you today?"
+            
+            # Farewell responses
+            elif any(word in text_lower for word in ["bye", "goodbye", "see you", "farewell"]):
+                response = "Goodbye! Have a great day!"
+            
+            # Gratitude responses
+            elif any(word in text_lower for word in ["thanks", "thank you", "appreciate", "grateful"]):
+                response = "You're welcome! Happy to help."
+            
+            # Time-related questions
+            elif any(word in text_lower for word in ["time", "what time", "current time"]):
+                from datetime import datetime
+                current_time = datetime.now().strftime("%I:%M %p")
+                response = f"The current time is {current_time}."
+            
+            # Date-related questions
+            elif any(word in text_lower for word in ["date", "what date", "today"]):
+                from datetime import datetime
+                current_date = datetime.now().strftime("%A, %B %d, %Y")
+                response = f"Today is {current_date}."
+            
+            # Name-related questions
+            elif any(word in text_lower for word in ["name", "who are you", "what are you"]):
+                response = "I'm Vask, your voice-based AI companion. I can help you with various tasks offline!"
+            
+            # How are you
+            elif "how are you" in text_lower:
+                response = "I'm doing great, thanks for asking! I'm here to help you with anything you need."
+            
+            # Help-related
+            elif any(word in text_lower for word in ["help", "assist", "support"]):
+                response = "I can help you with voice recognition, transcription, mood analysis, and more! What do you need?"
+            
+            # Default
+            else:
+                response = f"That's interesting! You mentioned '{text}'. Tell me more about that."
+        
+        # BENGALI RESPONSES
+        elif language == "bn":
+            # Greeting responses
+            if any(word in text_lower for word in ["হ্যালো", "হাই", "নমস্কার", "সালাম"]):
+                response = "হ্যালো! আপনার সাথে দেখা করে খুশি। আমি আপনাকে কীভাবে সাহায্য করতে পারি?"
+            
+            # Farewell responses
+            elif any(word in text_lower for word in ["বাই", "বিদায়", "আল্লাহ হাফেজ", "দেখা হবে"]):
+                response = "বিদায়! একটি দুর্দান্ত দিন কাটান!"
+            
+            # Gratitude responses
+            elif any(word in text_lower for word in ["ধন্যবাদ", "শুক্রিয়া", "কৃতজ্ঞ"]):
+                response = "স্বাগতম! আমি সাহায্য করতে পেরে খুশি।"
+            
+            # Time-related questions
+            elif any(word in text_lower for word in ["সময়", "এখন কয়টা", "বর্তমান সময়"]):
+                from datetime import datetime
+                current_time = datetime.now().strftime("%I:%M %p")
+                response = f"বর্তমান সময় হল {current_time}।"
+            
+            # Date-related questions
+            elif any(word in text_lower for word in ["তারিখ", "আজ কী", "আজকের তারিখ"]):
+                from datetime import datetime
+                current_date = datetime.now().strftime("%A, %B %d, %Y")
+                response = f"আজ হল {current_date}।"
+            
+            # Name-related questions
+            elif any(word in text_lower for word in ["নাম", "তুমি কে", "তুমি কী"]):
+                response = "আমি ভাস্ক, আপনার ভয়েস-ভিত্তিক এআই সঙ্গী। আমি আপনাকে অফলাইনে বিভিন্ন কাজে সাহায্য করতে পারি!"
+            
+            # How are you
+            elif "কেমন আছো" in text_lower or "কেমন আছেন" in text_lower:
+                response = "আমি ভালো আছি, জিজ্ঞাসা করার জন্য ধন্যবাদ! আমি আপনার যেকোনো প্রয়োজনে সাহায্য করতে এখানে আছি।"
+            
+            # Help-related
+            elif any(word in text_lower for word in ["সাহায্য", "সহায়তা", "সহায়ক"]):
+                response = "আমি ভয়েস স্বীকৃতি, ট্রান্সক্রিপশন, মেজাজ বিশ্লেষণ এবং আরও অনেক কিছুতে সাহায্য করতে পারি! আপনার কী প্রয়োজন?"
+            
+            # Default
+            else:
+                response = f"এটি আকর্ষণীয়! আপনি '{text}' উল্লেখ করেছেন। এটি সম্পর্কে আরও বলুন।"
+        
+        # OTHER LANGUAGES (default to English)
+        else:
+            response = f"That's interesting! You mentioned '{text}'. Tell me more about that."
+        
+        # Display response
+        self.response_text.config(state=tk.NORMAL)
+        self.response_text.delete(1.0, tk.END)
+        self.response_text.insert(tk.END, f"🤖 {response}")
+        self.response_text.config(state=tk.DISABLED)
+    
+    def clear_all(self):
+        """Clear all text."""
+        self.transcription_text.config(state=tk.NORMAL)
+        self.transcription_text.delete(1.0, tk.END)
+        self.transcription_text.config(state=tk.DISABLED)
+        
+        self.analysis_text.config(state=tk.NORMAL)
+        self.analysis_text.delete(1.0, tk.END)
+        self.analysis_text.config(state=tk.DISABLED)
+        
+        self.response_text.config(state=tk.NORMAL)
+        self.response_text.delete(1.0, tk.END)
+        self.response_text.config(state=tk.DISABLED)
+        
+        self.audio_data = None
+        self.sample_rate = None
+        self.playback_btn.config(state=tk.DISABLED)
+        self.transcribe_btn.config(state=tk.DISABLED)
+        self.update_status("Cleared", "blue")
+    
+    def clear_cache(self):
+        """Clear Whisper cache and temporary files."""
+        try:
+            self.update_status("Clearing cache...", "blue")
+            
+            # Clear Whisper cache
+            import shutil
+            cache_dir = Path.home() / ".cache" / "whisper"
+            if cache_dir.exists():
+                shutil.rmtree(cache_dir)
+                self.update_status("Cache cleared successfully", "green")
+            else:
+                self.update_status("No cache found", "green")
+            
+            # Clear temporary files
+            temp_files = list(Path(".").glob("temp_audio*.wav"))
+            for f in temp_files:
+                f.unlink()
+            
+            if temp_files:
+                self.update_status(f"Cleared {len(temp_files)} temporary files", "green")
+            
+        except Exception as e:
+            self.update_status(f"Cache clear error: {e}", "red")
+
+
+def main():
+    """Main entry point."""
+    root = tk.Tk()
+    gui = VaskGUI(root)
+    root.mainloop()
+
+
+if __name__ == "__main__":
+    main()
