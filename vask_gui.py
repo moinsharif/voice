@@ -34,11 +34,14 @@ class VaskGUI:
         self.audio_data = None
         self.sample_rate = None
         self.whisper_model = None
+        self.tts_engine = None
         self.conversation_history = []
         self.silence_threshold = 0.02
         self.silence_duration = 3
         self.auto_mode_active = False
         self.auto_mode_stop_event = threading.Event()
+        self.tts_speaking = False  # Track if TTS is currently speaking
+        self.tts_complete_event = threading.Event()  # Signal when TTS is done
         
         # Create UI
         self.create_ui()
@@ -46,6 +49,9 @@ class VaskGUI:
         # Initialize app and load model
         self.initialize_app()
         self.load_whisper_model()
+        
+        # Start auto mode by default
+        self.root.after(2000, self._start_auto_mode_on_init)
     
     def create_ui(self):
         """Create user interface."""
@@ -121,7 +127,7 @@ class VaskGUI:
         lang_combo.pack(side=tk.LEFT, padx=2)
         
         # Auto mode checkbox
-        self.auto_mode_var = tk.BooleanVar(value=False)
+        self.auto_mode_var = tk.BooleanVar(value=True)  # Enable by default
         auto_check = ttk.Checkbutton(
             control_frame,
             text="🤖 Auto Mode",
@@ -247,9 +253,44 @@ class VaskGUI:
             import whisper
             self.whisper_model = whisper.load_model("base")
             self.update_status("Whisper model loaded", "green")
+            
+            # Load TTS engine
+            self.load_tts_engine()
         except Exception as e:
             self.update_status(f"Error loading model: {e}", "red")
             messagebox.showerror("Error", f"Failed to load Whisper model: {e}")
+    
+    def load_tts_engine(self):
+        """Load Text-to-Speech engine."""
+        try:
+            self.update_status("Loading TTS engine...", "blue")
+            
+            # Try pyttsx3 first (most reliable)
+            try:
+                import pyttsx3
+                self.tts_engine = pyttsx3.init()
+                self.tts_engine.setProperty('rate', 150)
+                self.update_status("pyttsx3 TTS loaded", "green")
+                return
+            except Exception as e:
+                print(f"pyttsx3 error: {e}")
+            
+            # Fallback to piper
+            try:
+                import subprocess
+                result = subprocess.run(["piper", "--help"], capture_output=True)
+                if result.returncode == 0:
+                    self.tts_engine = "piper"
+                    self.update_status("Piper TTS loaded", "green")
+                    return
+            except:
+                pass
+            
+            self.update_status("Warning: TTS not available", "orange")
+            self.tts_engine = None
+        except Exception as e:
+            self.update_status(f"Warning: TTS not available: {e}", "orange")
+            self.tts_engine = None
     
     def update_status(self, message, color="black"):
         """Update status label."""
@@ -280,6 +321,11 @@ class VaskGUI:
             self.auto_mode_stop_event.set()
             if self.is_recording:
                 self.stop_recording()
+    
+    def _start_auto_mode_on_init(self):
+        """Start auto mode on initialization."""
+        if self.whisper_model is not None and self.auto_mode_var.get():
+            self.toggle_auto_mode()
     
     def _auto_mode_loop(self):
         """Continuous auto mode loop: record -> transcribe -> respond -> repeat."""
@@ -326,12 +372,20 @@ class VaskGUI:
         try:
             self.update_status("Transcribing...", "blue")
             
+            if self.audio_data is None or len(self.audio_data) == 0:
+                self.update_status("No audio data. Listening again...", "orange")
+                return
+            
             # Get selected language
             language = self.language_var.get()
             
+            # Convert audio to float32 for whisper
+            import numpy as np
+            audio_float = self.audio_data.astype(np.float32) / 32768.0
+            
             # Transcribe
             result = self.whisper_model.transcribe(
-                self.audio_data,
+                audio_float,
                 language=language if language != "auto" else None,
                 fp16=False
             )
@@ -346,14 +400,24 @@ class VaskGUI:
                 self.update_status("🤖 Auto mode: Generating response...", "blue")
                 self.generate_response(text)
                 
-                # Add to history
-                self.add_to_history(text, self.response_text.get(1.0, tk.END).replace("🤖 ", "").strip())
+                # Wait for TTS to finish speaking
+                import time
+                self.update_status("⏳ Waiting for response to finish...", "blue")
                 
-                self.update_status("✓ Response generated. Waiting to listen again...", "green")
+                # Wait for TTS to complete (max 30 seconds)
+                for i in range(300):  # 30 seconds max
+                    if not self.tts_speaking:
+                        break
+                    time.sleep(0.1)
+                
+                self.update_status("✓ Response spoken. Waiting to listen again...", "green")
             else:
                 self.update_status("No speech detected. Listening again...", "orange")
         
         except Exception as e:
+            print(f"Transcription error: {e}")
+            import traceback
+            traceback.print_exc()
             self.update_status(f"Transcription error: {e}", "red")
     
     def start_recording(self):
@@ -458,6 +522,7 @@ class VaskGUI:
             max_chunks = int(RATE / CHUNK * 300)  # Max 5 minutes
             silence_chunks = 0
             silence_threshold_chunks = int(RATE / CHUNK * self.silence_duration)  # 3 seconds
+            min_audio_chunks = int(RATE / CHUNK * 0.5)  # Minimum 0.5 seconds of audio
             
             for i in range(0, max_chunks):
                 if not self.is_recording:
@@ -466,8 +531,8 @@ class VaskGUI:
                 data = stream.read(CHUNK)
                 frames.append(data)
                 
-                # Check for silence in auto mode
-                if self.auto_mode_var.get():
+                # Check for silence in auto mode (only after minimum audio)
+                if self.auto_mode_var.get() and len(frames) > min_audio_chunks:
                     audio_chunk = np.frombuffer(data, dtype=np.int16).astype(np.float32) / 32768.0
                     rms = np.sqrt(np.mean(audio_chunk ** 2))
                     
@@ -476,7 +541,7 @@ class VaskGUI:
                     else:
                         silence_chunks = 0
                     
-                    # Auto stop after 3 seconds of silence
+                    # Auto stop after 3 seconds of silence (and at least 1 second of audio)
                     if silence_chunks > silence_threshold_chunks and len(frames) > int(RATE / CHUNK * 1):
                         self.update_status("Silence detected. Stopping recording...", "orange")
                         break
@@ -664,6 +729,11 @@ class VaskGUI:
         self.response_text.insert(tk.END, f"🤖 {response}")
         self.response_text.config(state=tk.DISABLED)
         
+        # Speak response in a separate thread (non-blocking start, but blocking execution)
+        thread = threading.Thread(target=self._speak_response, args=(response,))
+        thread.daemon = False  # Don't make it daemon so we can wait for it
+        thread.start()
+        
         # Add to history
         self.add_to_history(text, response)
     
@@ -680,6 +750,80 @@ class VaskGUI:
         
         # Update display
         self.update_history_display()
+    
+    def _speak_response(self, text):
+        """Speak the response using TTS - blocking call."""
+        try:
+            if self.tts_engine is None:
+                return
+            
+            self.tts_speaking = True
+            self.tts_complete_event.clear()
+            
+            self.update_status("🔊 Speaking response...", "blue")
+            
+            try:
+                # Create fresh engine instance each time
+                import pyttsx3
+                engine = pyttsx3.init()
+                engine.setProperty('rate', 150)
+                engine.setProperty('volume', 0.9)
+                
+                # Say and wait (blocking)
+                engine.say(text)
+                engine.runAndWait()
+                
+                # Clean up
+                try:
+                    engine.stop()
+                except:
+                    pass
+                
+                self.update_status("✓ Response spoken", "green")
+            
+            except Exception as e:
+                print(f"pyttsx3 error: {e}")
+                self.update_status(f"TTS error: {e}", "orange")
+        
+        finally:
+            self.tts_speaking = False
+            self.tts_complete_event.set()  # Signal that TTS is complete
+    
+    def _play_tts_audio(self, audio_file):
+        """Play TTS audio file."""
+        try:
+            import pyaudio
+            from scipy.io import wavfile
+            
+            # Load audio
+            sample_rate, audio_data = wavfile.read(audio_file)
+            
+            # Play audio
+            CHUNK = 1024
+            FORMAT = pyaudio.paInt16
+            CHANNELS = 1 if len(audio_data.shape) == 1 else audio_data.shape[1]
+            
+            p = pyaudio.PyAudio()
+            stream = p.open(
+                format=FORMAT,
+                channels=CHANNELS,
+                rate=sample_rate,
+                output=True,
+                frames_per_buffer=CHUNK
+            )
+            
+            # Write audio data
+            audio_bytes = audio_data.tobytes()
+            for i in range(0, len(audio_bytes), CHUNK * 2):
+                chunk = audio_bytes[i:i + CHUNK * 2]
+                stream.write(chunk)
+            
+            stream.stop_stream()
+            stream.close()
+            p.terminate()
+        
+        except Exception as e:
+            self.update_status(f"Audio playback error: {e}", "orange")
     
     def update_history_display(self):
         """Update history text display."""

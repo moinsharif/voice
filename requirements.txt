@@ -12,6 +12,7 @@ mediapipe==0.10.8
 
 # Text-to-Speech
 piper-tts==1.2.0
+pyttsx3==2.90
 
 # Encryption
 cryptography==41.0.7
