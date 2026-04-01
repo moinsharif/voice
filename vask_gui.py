@@ -763,24 +763,38 @@ class VaskGUI:
             self.update_status("🔊 Speaking response...", "blue")
             
             try:
-                # Create fresh engine instance each time
-                import pyttsx3
-                engine = pyttsx3.init()
-                engine.setProperty('rate', 150)
-                engine.setProperty('volume', 0.9)
+                # Use subprocess to run pyttsx3 in separate process (avoids the runAndWait bug)
+                import subprocess
+                import sys
                 
-                # Say and wait (blocking)
-                engine.say(text)
-                engine.runAndWait()
+                # Create a simple Python script to speak
+                script = f"""
+import pyttsx3
+engine = pyttsx3.init()
+engine.setProperty('rate', 150)
+engine.setProperty('volume', 0.9)
+engine.say('{text.replace("'", "\\'")}')
+engine.runAndWait()
+"""
                 
-                # Clean up
-                try:
-                    engine.stop()
-                except:
-                    pass
+                # Run in subprocess
+                process = subprocess.Popen(
+                    [sys.executable, "-c", script],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE
+                )
+                
+                # Wait for process to complete
+                stdout, stderr = process.communicate(timeout=30)
+                
+                if process.returncode != 0:
+                    print(f"TTS subprocess error: {stderr.decode()}")
                 
                 self.update_status("✓ Response spoken", "green")
             
+            except subprocess.TimeoutExpired:
+                process.kill()
+                self.update_status("TTS timeout", "orange")
             except Exception as e:
                 print(f"pyttsx3 error: {e}")
                 self.update_status(f"TTS error: {e}", "orange")
