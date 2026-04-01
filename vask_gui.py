@@ -37,6 +37,8 @@ class VaskGUI:
         self.conversation_history = []
         self.silence_threshold = 0.02
         self.silence_duration = 3
+        self.auto_mode_active = False
+        self.auto_mode_stop_event = threading.Event()
         
         # Create UI
         self.create_ui()
@@ -218,6 +220,20 @@ class VaskGUI:
         try:
             self.update_status("Initializing Vask...", "blue")
             self.app = VaskApplication()
+            
+            # Check offline operation - show warning if models missing
+            offline_status = self.app.verify_offline_operation()
+            if not offline_status:
+                model_report = self.app.get_offline_verification_report()
+                response = messagebox.askyesno(
+                    "Missing Models",
+                    f"Some models are missing:\n\n{model_report}\n\nContinue anyway?",
+                    icon=messagebox.WARNING
+                )
+                if not response:
+                    self.update_status("Initialization cancelled", "red")
+                    return
+            
             self.app.start()
             self.update_status("Ready", "green")
         except Exception as e:
@@ -250,12 +266,95 @@ class VaskGUI:
     def toggle_auto_mode(self):
         """Toggle auto mode on/off."""
         if self.auto_mode_var.get():
-            self.update_status("Auto mode enabled. Recording will start automatically.", "blue")
-            self.start_recording()
+            self.update_status("Auto mode enabled. Starting continuous conversation...", "blue")
+            self.auto_mode_active = True
+            self.auto_mode_stop_event.clear()
+            
+            # Start auto mode loop in a separate thread
+            thread = threading.Thread(target=self._auto_mode_loop)
+            thread.daemon = True
+            thread.start()
         else:
             self.update_status("Auto mode disabled.", "blue")
+            self.auto_mode_active = False
+            self.auto_mode_stop_event.set()
             if self.is_recording:
                 self.stop_recording()
+    
+    def _auto_mode_loop(self):
+        """Continuous auto mode loop: record -> transcribe -> respond -> repeat."""
+        import time
+        
+        while self.auto_mode_active and not self.auto_mode_stop_event.is_set():
+            try:
+                # Step 1: Record audio
+                self.update_status("🎤 Auto mode: Recording...", "blue")
+                self.start_recording()
+                
+                # Wait for recording to complete
+                while self.is_recording and not self.auto_mode_stop_event.is_set():
+                    time.sleep(0.1)
+                
+                if self.auto_mode_stop_event.is_set():
+                    break
+                
+                # Step 2: Transcribe audio
+                if self.audio_data is not None:
+                    self.update_status("📝 Auto mode: Transcribing...", "blue")
+                    self._transcribe_thread_auto()
+                    
+                    # Wait a bit for transcription to complete
+                    time.sleep(1)
+                
+                if self.auto_mode_stop_event.is_set():
+                    break
+                
+                # Step 3: Generate response (happens in transcribe thread)
+                # Wait 3 seconds before next cycle
+                self.update_status("⏳ Auto mode: Waiting 3 seconds before next...", "green")
+                for i in range(30):  # 3 seconds in 0.1s increments
+                    if self.auto_mode_stop_event.is_set():
+                        break
+                    time.sleep(0.1)
+                
+            except Exception as e:
+                self.update_status(f"Auto mode error: {e}", "red")
+                time.sleep(1)
+    
+    def _transcribe_thread_auto(self):
+        """Transcription for auto mode (with auto response)."""
+        try:
+            self.update_status("Transcribing...", "blue")
+            
+            # Get selected language
+            language = self.language_var.get()
+            
+            # Transcribe
+            result = self.whisper_model.transcribe(
+                self.audio_data,
+                language=language if language != "auto" else None,
+                fp16=False
+            )
+            
+            text = result.get("text", "").strip()
+            
+            if text:
+                self.display_transcription(text)
+                self.analyze_transcription(text)
+                
+                # Auto generate response
+                self.update_status("🤖 Auto mode: Generating response...", "blue")
+                self.generate_response(text)
+                
+                # Add to history
+                self.add_to_history(text, self.response_text.get(1.0, tk.END).replace("🤖 ", "").strip())
+                
+                self.update_status("✓ Response generated. Waiting to listen again...", "green")
+            else:
+                self.update_status("No speech detected. Listening again...", "orange")
+        
+        except Exception as e:
+            self.update_status(f"Transcription error: {e}", "red")
     
     def start_recording(self):
         """Start recording voice."""
