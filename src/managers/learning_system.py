@@ -41,6 +41,16 @@ class LearningSystem:
     def __init__(self):
         """Initialize learning system."""
         self.logger = Logger("LearningSystem")
+        self.context_manager = None
+
+    def set_context_manager(self, context_manager) -> None:
+        """Set context manager for learning system.
+        
+        Args:
+            context_manager: ContextManager instance
+        """
+        self.context_manager = context_manager
+        self.logger.info("Context manager set for learning system")
 
     def analyze_day(self, user_id: str, sessions: List[Session]) -> LearningInsights:
         """Analyze all interactions from a day.

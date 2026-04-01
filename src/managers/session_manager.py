@@ -154,6 +154,8 @@ class SessionManager:
     def process_user_input(self, audio_data: bytes) -> Optional[str]:
         """Process user input through full pipeline.
         
+        Implements data flow: input → recognition → context → AI → mood → output
+        
         Args:
             audio_data: Audio data from user
             
@@ -161,57 +163,127 @@ class SessionManager:
             AI response text or None on error
         """
         try:
-            if not self.current_session or not all([
-                self.speech_engine, self.ai_model, self.tts_engine, self.mood_engine
-            ]):
+            # Verify session and components are initialized
+            if not self.current_session:
+                self.logger.error("No active session")
+                return None
+            
+            if not all([self.speech_engine, self.ai_model, self.tts_engine, self.mood_engine]):
+                self.logger.error("Not all components are initialized")
                 return None
 
-            # 1. Speech Recognition
+            # ===== STAGE 1: SPEECH RECOGNITION =====
             self.current_state = SessionState.LISTENING
-            transcription = self.speech_engine.transcribe(audio_data)
-
-            if transcription.error or not transcription.text:
-                self.logger.warning(f"Speech recognition failed: {transcription.error}")
+            self.logger.info("Stage 1: Speech Recognition - Starting")
+            
+            try:
+                transcription = self.speech_engine.transcribe(audio_data)
+                
+                if transcription.error or not transcription.text:
+                    self.logger.warning(f"Speech recognition failed: {transcription.error}")
+                    self.current_state = SessionState.IDLE
+                    return None
+                
+                user_message = transcription.text
+                self.logger.info(f"Stage 1: Speech Recognition - Success: '{user_message}'")
+                
+            except Exception as e:
+                self.logger.error(f"Stage 1: Speech Recognition - Error: {e}")
+                self.current_state = SessionState.IDLE
                 return None
 
-            user_message = transcription.text
-            self.logger.info(f"Transcribed: {user_message}")
+            # ===== STAGE 2: MOOD ANALYSIS =====
+            self.logger.info("Stage 2: Mood Analysis - Starting")
+            
+            try:
+                mood = self.mood_engine.analyze_mood(audio_data)
+                mood_classification = mood.classification if mood else "neutral"
+                self.logger.info(f"Stage 2: Mood Analysis - Detected: {mood_classification}")
+                
+            except Exception as e:
+                self.logger.error(f"Stage 2: Mood Analysis - Error: {e}")
+                mood = None
+                mood_classification = "neutral"
 
-            # 2. Mood Analysis
-            mood = self.mood_engine.analyze_mood(audio_data)
+            # ===== STAGE 3: CONTEXT PREPARATION =====
+            self.logger.info("Stage 3: Context Preparation - Starting")
+            
+            try:
+                context = ConversationContext()
+                context.exchanges = self.context_manager.get_recent_exchanges()
+                context.user_profile = self.context_manager.get_user_profile()
+                context.mood_state = mood_classification
+                
+                self.logger.info(f"Stage 3: Context Preparation - Context size: {len(context.exchanges)} exchanges")
+                
+            except Exception as e:
+                self.logger.error(f"Stage 3: Context Preparation - Error: {e}")
+                return None
 
-            # 3. AI Response Generation
+            # ===== STAGE 4: AI RESPONSE GENERATION =====
             self.current_state = SessionState.PROCESSING
-            context = ConversationContext()
-            context.exchanges = self.context_manager.get_recent_exchanges()
-            context.user_profile = self.context_manager.get_user_profile()
-            context.mood_state = mood.classification if mood else "neutral"
+            self.logger.info("Stage 4: AI Response Generation - Starting")
+            
+            try:
+                ai_response = self.ai_model.generate_response(context, user_message)
+                
+                if not ai_response:
+                    self.logger.warning("Stage 4: AI Response Generation - Empty response")
+                    self.current_state = SessionState.IDLE
+                    return None
+                
+                self.logger.info(f"Stage 4: AI Response Generation - Success: '{ai_response[:100]}...'")
+                
+            except Exception as e:
+                self.logger.error(f"Stage 4: AI Response Generation - Error: {e}")
+                self.current_state = SessionState.IDLE
+                return None
 
-            ai_response = self.ai_model.generate_response(context, user_message)
+            # ===== STAGE 5: CONTEXT UPDATE =====
+            self.logger.info("Stage 5: Context Update - Starting")
+            
+            try:
+                exchange = Exchange(
+                    timestamp=datetime.now(),
+                    user_message=user_message,
+                    ai_response=ai_response,
+                    mood_detected=mood
+                )
+                
+                self.context_manager.add_exchange(exchange)
+                self.current_session.exchanges.append(exchange)
+                self.exchange_count += 1
+                
+                self.logger.info(f"Stage 5: Context Update - Exchange {self.exchange_count} added")
+                
+            except Exception as e:
+                self.logger.error(f"Stage 5: Context Update - Error: {e}")
+                return None
 
-            # 4. Create exchange
-            exchange = Exchange(
-                timestamp=datetime.now(),
-                user_message=user_message,
-                ai_response=ai_response,
-                mood_detected=mood
-            )
-            self.context_manager.add_exchange(exchange)
-            self.current_session.exchanges.append(exchange)
-            self.exchange_count += 1
-
-            # 5. Text-to-Speech
+            # ===== STAGE 6: TEXT-TO-SPEECH OUTPUT =====
             self.current_state = SessionState.SPEAKING
-            audio_output = self.tts_engine.synthesize(ai_response)
-            if audio_output:
-                self.tts_engine.play_audio(audio_output)
+            self.logger.info("Stage 6: Text-to-Speech - Starting")
+            
+            try:
+                audio_output = self.tts_engine.synthesize(ai_response)
+                
+                if audio_output:
+                    self.tts_engine.play_audio(audio_output)
+                    self.logger.info("Stage 6: Text-to-Speech - Audio played successfully")
+                else:
+                    self.logger.warning("Stage 6: Text-to-Speech - No audio output generated")
+                
+            except Exception as e:
+                self.logger.error(f"Stage 6: Text-to-Speech - Error: {e}")
+                # Don't fail the entire pipeline if TTS fails
 
+            # ===== PIPELINE COMPLETE =====
             self.current_state = SessionState.IDLE
-            self.logger.info(f"Processed exchange {self.exchange_count}")
+            self.logger.info(f"Pipeline complete - Processed exchange {self.exchange_count}")
             return ai_response
 
         except Exception as e:
-            self.logger.error(f"Failed to process user input: {e}")
+            self.logger.error(f"Unexpected error in process_user_input: {e}")
             self.current_state = SessionState.IDLE
             return None
 

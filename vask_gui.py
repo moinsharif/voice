@@ -1,5 +1,5 @@
 """
-Vask Voice AI - Graphical User Interface
+Vask Voice AI - Graphical User Interface with Auto Mode
 Real-time voice recording, transcription, and AI response
 """
 
@@ -25,7 +25,7 @@ class VaskGUI:
         """Initialize GUI."""
         self.root = root
         self.root.title("Vask - Voice AI Companion")
-        self.root.geometry("900x700")
+        self.root.geometry("900x800")
         self.root.resizable(True, True)
         
         # Application
@@ -33,8 +33,10 @@ class VaskGUI:
         self.is_recording = False
         self.audio_data = None
         self.sample_rate = None
-        self.whisper_model = None  # Cache model to avoid re-downloading
-        self.conversation_history = []  # Store conversation history
+        self.whisper_model = None
+        self.conversation_history = []
+        self.silence_threshold = 0.02
+        self.silence_duration = 3
         
         # Create UI
         self.create_ui()
@@ -116,6 +118,16 @@ class VaskGUI:
         )
         lang_combo.pack(side=tk.LEFT, padx=2)
         
+        # Auto mode checkbox
+        self.auto_mode_var = tk.BooleanVar(value=False)
+        auto_check = ttk.Checkbutton(
+            control_frame,
+            text="🤖 Auto Mode",
+            variable=self.auto_mode_var,
+            command=self.toggle_auto_mode
+        )
+        auto_check.pack(side=tk.LEFT, padx=5)
+        
         # Clear button
         clear_btn = ttk.Button(
             control_frame,
@@ -132,13 +144,21 @@ class VaskGUI:
         )
         cache_btn.pack(side=tk.LEFT, padx=5)
         
+        # Help button
+        help_btn = ttk.Button(
+            control_frame,
+            text="❓ Help",
+            command=self.show_help
+        )
+        help_btn.pack(side=tk.LEFT, padx=5)
+        
         # Transcription frame
         trans_frame = ttk.LabelFrame(main_frame, text="Transcription", padding="10")
         trans_frame.grid(row=3, column=0, columnspan=3, sticky=(tk.W, tk.E, tk.N, tk.S), pady=10)
         
         self.transcription_text = scrolledtext.ScrolledText(
             trans_frame,
-            height=4,
+            height=3,
             width=80,
             font=("Arial", 11),
             state=tk.DISABLED
@@ -151,7 +171,7 @@ class VaskGUI:
         
         self.analysis_text = scrolledtext.ScrolledText(
             analysis_frame,
-            height=4,
+            height=3,
             width=80,
             font=("Arial", 10),
             state=tk.DISABLED
@@ -164,7 +184,7 @@ class VaskGUI:
         
         self.response_text = scrolledtext.ScrolledText(
             response_frame,
-            height=3,
+            height=2,
             width=80,
             font=("Arial", 11),
             state=tk.DISABLED
@@ -191,6 +211,7 @@ class VaskGUI:
         main_frame.rowconfigure(3, weight=1)
         main_frame.rowconfigure(4, weight=1)
         main_frame.rowconfigure(5, weight=1)
+        main_frame.rowconfigure(6, weight=1)
     
     def initialize_app(self):
         """Initialize Vask application."""
@@ -219,6 +240,23 @@ class VaskGUI:
         self.status_label.config(text=message, foreground=color)
         self.root.update()
     
+    def toggle_recording(self):
+        """Toggle recording on/off."""
+        if not self.is_recording:
+            self.start_recording()
+        else:
+            self.stop_recording()
+    
+    def toggle_auto_mode(self):
+        """Toggle auto mode on/off."""
+        if self.auto_mode_var.get():
+            self.update_status("Auto mode enabled. Recording will start automatically.", "blue")
+            self.start_recording()
+        else:
+            self.update_status("Auto mode disabled.", "blue")
+            if self.is_recording:
+                self.stop_recording()
+    
     def start_recording(self):
         """Start recording voice."""
         if self.is_recording:
@@ -233,13 +271,6 @@ class VaskGUI:
         thread = threading.Thread(target=self._record_thread)
         thread.daemon = True
         thread.start()
-    
-    def toggle_recording(self):
-        """Toggle recording on/off."""
-        if not self.is_recording:
-            self.start_recording()
-        else:
-            self.stop_recording()
     
     def stop_recording(self):
         """Stop recording."""
@@ -303,7 +334,7 @@ class VaskGUI:
             self.playback_btn.config(state=tk.NORMAL)
     
     def _record_thread(self):
-        """Recording thread."""
+        """Recording thread with auto silence detection."""
         try:
             self.update_status("Recording... Speak now!", "orange")
             
@@ -326,6 +357,8 @@ class VaskGUI:
             
             frames = []
             max_chunks = int(RATE / CHUNK * 300)  # Max 5 minutes
+            silence_chunks = 0
+            silence_threshold_chunks = int(RATE / CHUNK * self.silence_duration)  # 3 seconds
             
             for i in range(0, max_chunks):
                 if not self.is_recording:
@@ -333,6 +366,21 @@ class VaskGUI:
                 
                 data = stream.read(CHUNK)
                 frames.append(data)
+                
+                # Check for silence in auto mode
+                if self.auto_mode_var.get():
+                    audio_chunk = np.frombuffer(data, dtype=np.int16).astype(np.float32) / 32768.0
+                    rms = np.sqrt(np.mean(audio_chunk ** 2))
+                    
+                    if rms < self.silence_threshold:
+                        silence_chunks += 1
+                    else:
+                        silence_chunks = 0
+                    
+                    # Auto stop after 3 seconds of silence
+                    if silence_chunks > silence_threshold_chunks and len(frames) > int(RATE / CHUNK * 1):
+                        self.update_status("Silence detected. Stopping recording...", "orange")
+                        break
                 
                 # Update progress
                 seconds = i * CHUNK / RATE
@@ -347,9 +395,14 @@ class VaskGUI:
                 self.audio_data = np.frombuffer(b''.join(frames), dtype=np.int16)
                 self.sample_rate = RATE
                 
-                self.update_status("Recording complete. Ready to transcribe.", "green")
-                self.playback_btn.config(state=tk.NORMAL)  # Enable playback
+                self.update_status("Recording complete.", "green")
+                self.playback_btn.config(state=tk.NORMAL)
                 self.transcribe_btn.config(state=tk.NORMAL)
+                
+                # Auto transcribe if auto mode is enabled
+                if self.auto_mode_var.get():
+                    self.update_status("Auto transcribing...", "blue")
+                    self.transcribe_audio()
             else:
                 self.update_status("No audio recorded", "red")
             
@@ -395,7 +448,7 @@ class VaskGUI:
             # Transcribe using cached model
             from scipy.io import wavfile
             
-            # Load audio with scipy instead of ffmpeg
+            # Load audio with scipy
             sample_rate, audio_data = wavfile.read(temp_file)
             
             # Convert to float32
@@ -412,7 +465,7 @@ class VaskGUI:
                 num_samples = int(len(audio_data) * 16000 / sample_rate)
                 audio_data = signal.resample(audio_data, num_samples)
             
-            # Transcribe using cached model with selected language
+            # Transcribe using cached model
             if self.whisper_model is None:
                 self.update_status("Model not loaded", "red")
                 return
@@ -484,94 +537,25 @@ class VaskGUI:
         """Generate AI response using offline knowledge base."""
         text_lower = text.lower()
         
-        # Detect language
-        language = self.language_var.get()
-        
         # ENGLISH RESPONSES
-        if language == "en":
-            # Greeting responses
-            if any(word in text_lower for word in ["hello", "hi", "hey", "greetings"]):
-                response = "Hello! Nice to meet you. How can I help you today?"
-            
-            # Farewell responses
-            elif any(word in text_lower for word in ["bye", "goodbye", "see you", "farewell"]):
-                response = "Goodbye! Have a great day!"
-            
-            # Gratitude responses
-            elif any(word in text_lower for word in ["thanks", "thank you", "appreciate", "grateful"]):
-                response = "You're welcome! Happy to help."
-            
-            # Time-related questions
-            elif any(word in text_lower for word in ["time", "what time", "current time"]):
-                from datetime import datetime
-                current_time = datetime.now().strftime("%I:%M %p")
-                response = f"The current time is {current_time}."
-            
-            # Date-related questions
-            elif any(word in text_lower for word in ["date", "what date", "today"]):
-                from datetime import datetime
-                current_date = datetime.now().strftime("%A, %B %d, %Y")
-                response = f"Today is {current_date}."
-            
-            # Name-related questions
-            elif any(word in text_lower for word in ["name", "who are you", "what are you"]):
-                response = "I'm Vask, your voice-based AI companion. I can help you with various tasks offline!"
-            
-            # How are you
-            elif "how are you" in text_lower:
-                response = "I'm doing great, thanks for asking! I'm here to help you with anything you need."
-            
-            # Help-related
-            elif any(word in text_lower for word in ["help", "assist", "support"]):
-                response = "I can help you with voice recognition, transcription, mood analysis, and more! What do you need?"
-            
-            # Default
-            else:
-                response = f"That's interesting! You mentioned '{text}'. Tell me more about that."
-        
-        # BENGALI RESPONSES
-        elif language == "bn":
-            # Greeting responses
-            if any(word in text_lower for word in ["হ্যালো", "হাই", "নমস্কার", "সালাম"]):
-                response = "হ্যালো! আপনার সাথে দেখা করে খুশি। আমি আপনাকে কীভাবে সাহায্য করতে পারি?"
-            
-            # Farewell responses
-            elif any(word in text_lower for word in ["বাই", "বিদায়", "আল্লাহ হাফেজ", "দেখা হবে"]):
-                response = "বিদায়! একটি দুর্দান্ত দিন কাটান!"
-            
-            # Gratitude responses
-            elif any(word in text_lower for word in ["ধন্যবাদ", "শুক্রিয়া", "কৃতজ্ঞ"]):
-                response = "স্বাগতম! আমি সাহায্য করতে পেরে খুশি।"
-            
-            # Time-related questions
-            elif any(word in text_lower for word in ["সময়", "এখন কয়টা", "বর্তমান সময়"]):
-                from datetime import datetime
-                current_time = datetime.now().strftime("%I:%M %p")
-                response = f"বর্তমান সময় হল {current_time}।"
-            
-            # Date-related questions
-            elif any(word in text_lower for word in ["তারিখ", "আজ কী", "আজকের তারিখ"]):
-                from datetime import datetime
-                current_date = datetime.now().strftime("%A, %B %d, %Y")
-                response = f"আজ হল {current_date}।"
-            
-            # Name-related questions
-            elif any(word in text_lower for word in ["নাম", "তুমি কে", "তুমি কী"]):
-                response = "আমি ভাস্ক, আপনার ভয়েস-ভিত্তিক এআই সঙ্গী। আমি আপনাকে অফলাইনে বিভিন্ন কাজে সাহায্য করতে পারি!"
-            
-            # How are you
-            elif "কেমন আছো" in text_lower or "কেমন আছেন" in text_lower:
-                response = "আমি ভালো আছি, জিজ্ঞাসা করার জন্য ধন্যবাদ! আমি আপনার যেকোনো প্রয়োজনে সাহায্য করতে এখানে আছি।"
-            
-            # Help-related
-            elif any(word in text_lower for word in ["সাহায্য", "সহায়তা", "সহায়ক"]):
-                response = "আমি ভয়েস স্বীকৃতি, ট্রান্সক্রিপশন, মেজাজ বিশ্লেষণ এবং আরও অনেক কিছুতে সাহায্য করতে পারি! আপনার কী প্রয়োজন?"
-            
-            # Default
-            else:
-                response = f"এটি আকর্ষণীয়! আপনি '{text}' উল্লেখ করেছেন। এটি সম্পর্কে আরও বলুন।"
-        
-        # OTHER LANGUAGES (default to English)
+        if any(word in text_lower for word in ["hello", "hi", "hey", "greetings"]):
+            response = "Hello! Nice to meet you. How can I help you today?"
+        elif any(word in text_lower for word in ["bye", "goodbye", "see you", "farewell"]):
+            response = "Goodbye! Have a great day!"
+        elif any(word in text_lower for word in ["thanks", "thank you", "appreciate", "grateful"]):
+            response = "You're welcome! Happy to help."
+        elif any(word in text_lower for word in ["time", "what time", "current time"]):
+            current_time = datetime.now().strftime("%I:%M %p")
+            response = f"The current time is {current_time}."
+        elif any(word in text_lower for word in ["date", "what date", "today"]):
+            current_date = datetime.now().strftime("%A, %B %d, %Y")
+            response = f"Today is {current_date}."
+        elif any(word in text_lower for word in ["name", "who are you", "what are you"]):
+            response = "I'm Vask, your voice-based AI companion. I can help you with various tasks offline!"
+        elif "how are you" in text_lower:
+            response = "I'm doing great, thanks for asking! I'm here to help you with anything you need."
+        elif any(word in text_lower for word in ["help", "assist", "support"]):
+            response = "I can help you with voice recognition, transcription, mood analysis, and more! What do you need?"
         else:
             response = f"That's interesting! You mentioned '{text}'. Tell me more about that."
         
@@ -580,6 +564,36 @@ class VaskGUI:
         self.response_text.delete(1.0, tk.END)
         self.response_text.insert(tk.END, f"🤖 {response}")
         self.response_text.config(state=tk.DISABLED)
+        
+        # Add to history
+        self.add_to_history(text, response)
+    
+    def add_to_history(self, user_text, ai_response):
+        """Add conversation to history."""
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        
+        # Add to list
+        self.conversation_history.append({
+            "time": timestamp,
+            "user": user_text,
+            "ai": ai_response
+        })
+        
+        # Update display
+        self.update_history_display()
+    
+    def update_history_display(self):
+        """Update history text display."""
+        self.history_text.config(state=tk.NORMAL)
+        self.history_text.delete(1.0, tk.END)
+        
+        # Show last 5 conversations
+        for item in self.conversation_history[-5:]:
+            line = f"[{item['time']}] You: {item['user']}\n"
+            line += f"         AI: {item['ai']}\n\n"
+            self.history_text.insert(tk.END, line)
+        
+        self.history_text.config(state=tk.DISABLED)
     
     def clear_all(self):
         """Clear all text."""
@@ -625,6 +639,100 @@ class VaskGUI:
             
         except Exception as e:
             self.update_status(f"Cache clear error: {e}", "red")
+    
+    def show_help(self):
+        """Show help window with available commands."""
+        help_window = tk.Toplevel(self.root)
+        help_window.title("Vask - Help & Commands")
+        help_window.geometry("700x600")
+        
+        # Title
+        title_label = ttk.Label(
+            help_window,
+            text="Available Commands & Questions",
+            font=("Arial", 14, "bold")
+        )
+        title_label.pack(pady=10)
+        
+        # Help text
+        help_text = scrolledtext.ScrolledText(
+            help_window,
+            height=30,
+            width=80,
+            font=("Courier", 10),
+            wrap=tk.WORD
+        )
+        help_text.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        # Commands list
+        commands = """
+GREETING COMMANDS:
+  • "Hello" / "Hi" / "Hey"
+    → Response: Hello! Nice to meet you. How can I help you today?
+
+FAREWELL COMMANDS:
+  • "Bye" / "Goodbye" / "See you"
+    → Response: Goodbye! Have a great day!
+
+GRATITUDE COMMANDS:
+  • "Thanks" / "Thank you" / "Appreciate"
+    → Response: You're welcome! Happy to help.
+
+TIME COMMANDS:
+  • "What time is it?" / "Current time"
+    → Response: The current time is [HH:MM AM/PM].
+
+DATE COMMANDS:
+  • "What date is it?" / "Today" / "What's today?"
+    → Response: Today is [Day, Month DD, YYYY].
+
+IDENTITY COMMANDS:
+  • "Who are you?" / "What are you?" / "Your name?"
+    → Response: I'm Vask, your voice-based AI companion...
+
+STATUS COMMANDS:
+  • "How are you?"
+    → Response: I'm doing great, thanks for asking!
+
+HELP COMMANDS:
+  • "Help" / "Assist" / "Support"
+    → Response: I can help you with voice recognition, transcription...
+
+AUTO MODE:
+  • Enable "🤖 Auto Mode" checkbox
+  • Recording starts automatically
+  • Stops after 3 seconds of silence
+  • Automatically transcribes
+  • Generates AI response
+
+FEATURES:
+  ✓ Record voice (Start/Stop anytime)
+  ✓ Playback your recording
+  ✓ Transcribe speech to text
+  ✓ AI responses (offline)
+  ✓ Conversation history
+  ✓ Auto mode with silence detection
+  ✓ No internet required
+
+TIPS:
+  • Click "Start Recording" to begin
+  • Click "Stop Recording" to stop
+  • Click "Playback" to hear your recording
+  • Click "Transcribe" to convert speech to text
+  • Enable "Auto Mode" for hands-free operation
+  • View conversation history at the bottom
+        """
+        
+        help_text.insert(tk.END, commands)
+        help_text.config(state=tk.DISABLED)
+        
+        # Close button
+        close_btn = ttk.Button(
+            help_window,
+            text="Close",
+            command=help_window.destroy
+        )
+        close_btn.pack(pady=10)
 
 
 def main():
