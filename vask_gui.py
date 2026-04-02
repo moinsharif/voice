@@ -152,6 +152,14 @@ class VaskGUI:
         )
         cache_btn.pack(side=tk.LEFT, padx=5)
         
+        # Export History button
+        export_btn = ttk.Button(
+            control_frame,
+            text="💾 Export History",
+            command=self.export_history
+        )
+        export_btn.pack(side=tk.LEFT, padx=5)
+        
         # Help button
         help_btn = ttk.Button(
             control_frame,
@@ -327,6 +335,41 @@ class VaskGUI:
         if self.whisper_model is not None and self.auto_mode_var.get():
             self.toggle_auto_mode()
     
+    def play_beep(self, frequency=1000, duration=0.2, volume=0.2):
+        """Play a beep sound."""
+        try:
+            import pyaudio
+            import numpy as np
+            
+            RATE = 44100
+            frames = int(RATE * duration)
+            
+            # Generate sine wave
+            t = np.linspace(0, duration, frames)
+            wave = np.sin(2 * np.pi * frequency * t)
+            
+            # Apply volume (0.0 to 1.0)
+            wave = wave * volume
+            
+            # Convert to int16
+            wave = (wave * 32767).astype(np.int16)
+            
+            # Play
+            p = pyaudio.PyAudio()
+            stream = p.open(
+                format=pyaudio.paInt16,
+                channels=1,
+                rate=RATE,
+                output=True
+            )
+            
+            stream.write(wave.tobytes())
+            stream.stop_stream()
+            stream.close()
+            p.terminate()
+        except Exception as e:
+            print(f"Beep error: {e}")
+    
     def _auto_mode_loop(self):
         """Continuous auto mode loop: record -> transcribe -> respond -> repeat."""
         import time
@@ -344,21 +387,25 @@ class VaskGUI:
                 if self.auto_mode_stop_event.is_set():
                     break
                 
-                # Step 2: Transcribe audio
-                if self.audio_data is not None:
-                    self.update_status("📝 Auto mode: Transcribing...", "blue")
-                    self._transcribe_thread_auto()
-                    
-                    # Wait a bit for transcription to complete
-                    time.sleep(1)
+                # Step 2: Transcription happens in _record_thread automatically
+                # Wait for transcription to complete
+                self.update_status("📝 Auto mode: Transcribing...", "blue")
+                time.sleep(0.5)
                 
                 if self.auto_mode_stop_event.is_set():
                     break
                 
-                # Step 3: Generate response (happens in transcribe thread)
-                # Wait 3 seconds before next cycle
-                self.update_status("⏳ Auto mode: Waiting 3 seconds before next...", "green")
-                for i in range(30):  # 3 seconds in 0.1s increments
+                # Step 3: Wait for TTS to finish
+                self.update_status("⏳ Waiting for response to finish...", "blue")
+                max_wait = 600  # 60 seconds
+                for i in range(max_wait):
+                    if not self.tts_speaking:
+                        break
+                    time.sleep(0.1)
+                
+                # Step 4: Wait 1 second before next cycle
+                self.update_status("⏳ Auto mode: Waiting 1 second before next...", "green")
+                for i in range(10):  # 1 second in 0.1s increments
                     if self.auto_mode_stop_event.is_set():
                         break
                     time.sleep(0.1)
@@ -383,14 +430,23 @@ class VaskGUI:
             import numpy as np
             audio_float = self.audio_data.astype(np.float32) / 32768.0
             
-            # Transcribe
-            result = self.whisper_model.transcribe(
-                audio_float,
-                language=language if language != "auto" else None,
-                fp16=False
-            )
+            # Transcribe with fresh model state
+            try:
+                result = self.whisper_model.transcribe(
+                    audio_float,
+                    language=language if language != "auto" else None,
+                    fp16=False,
+                    verbose=False  # Disable verbose output
+                )
+            except Exception as e:
+                print(f"Transcription failed: {e}")
+                self.update_status("Transcription failed. Listening again...", "orange")
+                return
             
             text = result.get("text", "").strip()
+            
+            # Clear audio data immediately after transcription
+            self.audio_data = None
             
             if text:
                 self.display_transcription(text)
@@ -404,11 +460,15 @@ class VaskGUI:
                 import time
                 self.update_status("⏳ Waiting for response to finish...", "blue")
                 
-                # Wait for TTS to complete (max 30 seconds)
-                for i in range(300):  # 30 seconds max
+                # Wait for TTS to complete (max 60 seconds for long responses)
+                max_wait = 600  # 60 seconds
+                for i in range(max_wait):
                     if not self.tts_speaking:
                         break
                     time.sleep(0.1)
+                
+                # Extra wait to ensure TTS is completely done
+                time.sleep(0.5)
                 
                 self.update_status("✓ Response spoken. Waiting to listen again...", "green")
             else:
@@ -425,6 +485,9 @@ class VaskGUI:
         if self.is_recording:
             return
         
+        # Play start beep (low volume)
+        self.play_beep(frequency=800, duration=0.15, volume=0.15)
+        
         self.is_recording = True
         self.record_btn.config(state=tk.NORMAL, text="⏹️ Stop Recording")
         self.playback_btn.config(state=tk.DISABLED)
@@ -438,6 +501,10 @@ class VaskGUI:
     def stop_recording(self):
         """Stop recording."""
         self.is_recording = False
+        
+        # Play stop beep (low volume)
+        self.play_beep(frequency=1200, duration=0.15, volume=0.15)
+        
         self.record_btn.config(text="🎤 Start Recording")
         self.update_status("Recording stopped", "green")
     
@@ -544,6 +611,8 @@ class VaskGUI:
                     # Auto stop after 3 seconds of silence (and at least 1 second of audio)
                     if silence_chunks > silence_threshold_chunks and len(frames) > int(RATE / CHUNK * 1):
                         self.update_status("Silence detected. Stopping recording...", "orange")
+                        # Play stop beep (low volume)
+                        self.play_beep(frequency=1200, duration=0.15, volume=0.15)
                         break
                 
                 # Update progress
@@ -566,9 +635,14 @@ class VaskGUI:
                 # Auto transcribe if auto mode is enabled
                 if self.auto_mode_var.get():
                     self.update_status("Auto transcribing...", "blue")
-                    self.transcribe_audio()
+                    # Use auto mode transcription thread
+                    thread = threading.Thread(target=self._transcribe_thread_auto)
+                    thread.daemon = False
+                    thread.start()
             else:
                 self.update_status("No audio recorded", "red")
+                # Clear audio data if nothing recorded
+                self.audio_data = None
             
             self.record_btn.config(state=tk.NORMAL, text="🎤 Start Recording")
             self.is_recording = False
@@ -760,6 +834,13 @@ class VaskGUI:
             self.tts_speaking = True
             self.tts_complete_event.clear()
             
+            # Completely stop recording during TTS
+            was_recording = self.is_recording
+            if was_recording:
+                self.is_recording = False
+                import time
+                time.sleep(0.2)  # Give time for recording thread to stop
+            
             self.update_status("🔊 Speaking response...", "blue")
             
             try:
@@ -798,6 +879,12 @@ engine.runAndWait()
             except Exception as e:
                 print(f"pyttsx3 error: {e}")
                 self.update_status(f"TTS error: {e}", "orange")
+            
+            # Resume recording if it was active
+            if was_recording:
+                import time
+                time.sleep(0.2)  # Give time for TTS to fully complete
+                self.is_recording = True
         
         finally:
             self.tts_speaking = False
@@ -844,8 +931,8 @@ engine.runAndWait()
         self.history_text.config(state=tk.NORMAL)
         self.history_text.delete(1.0, tk.END)
         
-        # Show last 5 conversations
-        for item in self.conversation_history[-5:]:
+        # Show all conversations
+        for item in self.conversation_history:
             line = f"[{item['time']}] You: {item['user']}\n"
             line += f"         AI: {item['ai']}\n\n"
             self.history_text.insert(tk.END, line)
@@ -853,7 +940,7 @@ engine.runAndWait()
         self.history_text.config(state=tk.DISABLED)
     
     def clear_all(self):
-        """Clear all text."""
+        """Clear all text and history."""
         self.transcription_text.config(state=tk.NORMAL)
         self.transcription_text.delete(1.0, tk.END)
         self.transcription_text.config(state=tk.DISABLED)
@@ -866,11 +953,15 @@ engine.runAndWait()
         self.response_text.delete(1.0, tk.END)
         self.response_text.config(state=tk.DISABLED)
         
+        # Clear history
+        self.conversation_history = []
+        self.update_history_display()
+        
         self.audio_data = None
         self.sample_rate = None
         self.playback_btn.config(state=tk.DISABLED)
         self.transcribe_btn.config(state=tk.DISABLED)
-        self.update_status("Cleared", "blue")
+        self.update_status("Cleared all", "blue")
     
     def clear_cache(self):
         """Clear Whisper cache and temporary files."""
@@ -896,6 +987,38 @@ engine.runAndWait()
             
         except Exception as e:
             self.update_status(f"Cache clear error: {e}", "red")
+    
+    def export_history(self):
+        """Export conversation history to a file."""
+        try:
+            if not self.conversation_history:
+                messagebox.showwarning("Warning", "No conversation history to export.")
+                return
+            
+            # Create filename with timestamp
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"vask_history_{timestamp}.txt"
+            
+            # Write history to file
+            with open(filename, 'w', encoding='utf-8') as f:
+                f.write("=" * 80 + "\n")
+                f.write("VASK CONVERSATION HISTORY\n")
+                f.write("=" * 80 + "\n\n")
+                
+                for item in self.conversation_history:
+                    f.write(f"[{item['time']}] You: {item['user']}\n")
+                    f.write(f"         AI: {item['ai']}\n\n")
+                
+                f.write("=" * 80 + "\n")
+                f.write(f"Total conversations: {len(self.conversation_history)}\n")
+                f.write(f"Exported: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            
+            self.update_status(f"History exported to {filename}", "green")
+            messagebox.showinfo("Success", f"History exported to:\n{filename}")
+        
+        except Exception as e:
+            self.update_status(f"Export error: {e}", "red")
+            messagebox.showerror("Error", f"Failed to export history: {e}")
     
     def show_help(self):
         """Show help window with available commands."""
