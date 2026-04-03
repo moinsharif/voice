@@ -839,7 +839,7 @@ class VaskGUI:
             if was_recording:
                 self.is_recording = False
                 import time
-                time.sleep(0.2)  # Give time for recording thread to stop
+                time.sleep(0.5)  # Give time for recording thread to stop
             
             self.update_status("🔊 Speaking response...", "blue")
             
@@ -883,7 +883,7 @@ engine.runAndWait()
             # Resume recording if it was active
             if was_recording:
                 import time
-                time.sleep(0.2)  # Give time for TTS to fully complete
+                time.sleep(1)  # Wait 1 second after TTS completes before resuming recording
                 self.is_recording = True
         
         finally:
